@@ -40,7 +40,7 @@ function LoginForm() {
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting },
+    formState: { isSubmitting },
   } = useForm<LoginForm>({ resolver: zodResolver(loginSchema) });
 
   const emailField = register('loginEmail');
@@ -71,7 +71,13 @@ function LoginForm() {
           <p className="mt-1 text-sm text-white/40">Use suas credenciais de operação.</p>
 
           <form
-            onSubmit={handleSubmit((values) => mutation.mutate(values))}
+            onSubmit={handleSubmit(
+              (values) => mutation.mutate(values),
+              (errors) => {
+                const message = errors.loginEmail?.message ?? errors.loginPassword?.message;
+                if (message) toast.error(message);
+              },
+            )}
             autoComplete="off"
             className="mt-7 space-y-4"
           >
@@ -101,7 +107,6 @@ function LoginForm() {
                 data-1p-ignore=""
                 className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-brand-500 focus:bg-white/[0.07]"
               />
-              {errors.loginEmail && <p className="mt-1.5 text-xs text-red-400">{errors.loginEmail.message}</p>}
             </div>
 
             <div>
@@ -119,7 +124,6 @@ function LoginForm() {
                 data-1p-ignore=""
                 className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition placeholder:text-white/25 focus:border-brand-500 focus:bg-white/[0.07]"
               />
-              {errors.loginPassword && <p className="mt-1.5 text-xs text-red-400">{errors.loginPassword.message}</p>}
             </div>
 
             <button
