@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth, useLogout } from '@/lib/auth-context';
@@ -33,9 +34,7 @@ export function Sidebar() {
   return (
     <aside className="flex h-screen w-64 shrink-0 flex-col border-r border-slate-200 bg-white">
       <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-5">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
-          SL
-        </div>
+        <Image src="/logo-mark.svg" alt="" width={32} height={32} className="h-8 w-8 shrink-0" />
         <div>
           <p className="text-sm font-semibold text-slate-900">Saymon Logistics</p>
           <p className="text-xs text-slate-500">Operações</p>

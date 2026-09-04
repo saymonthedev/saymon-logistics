@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense } from 'react';
+import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -41,7 +42,8 @@ function LoginForm() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4">
       <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-xl">
-        <div className="mb-6 text-center">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <Image src="/logo-mark.svg" alt="" width={44} height={44} className="mb-3 h-11 w-11" />
           <h1 className="text-xl font-semibold text-slate-900">Saymon Logistics</h1>
           <p className="mt-1 text-sm text-slate-500">Central de operações logísticas</p>
         </div>

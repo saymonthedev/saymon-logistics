@@ -26,5 +26,11 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  // Skips Next internals, the icon/favicon routes, and any public static
+  // asset (by extension) — none of those should ever redirect to /login,
+  // otherwise an unauthenticated visitor's browser would try to render the
+  // login page's HTML as an image (e.g. the logo on the login page itself).
+  matcher: [
+    '/((?!_next/static|_next/image|favicon\\.ico|icon\\.svg|apple-icon\\.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt)$).*)',
+  ],
 };
