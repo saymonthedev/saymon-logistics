@@ -1,0 +1,314 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  SUPERVISOR
+  OPERATOR
+}
+
+enum OrderStatus {
+  RECEIVED
+  RESERVED
+  PICKING
+  PACKED
+  SHIPPED
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+}
+
+enum OrderPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum ReservationStatus {
+  ACTIVE // stock is set aside, not yet picked
+  CONSUMED // picked and left the warehouse
+  RELEASED // returned to available stock (cancellation, correction)
+}
+
+enum PickingWaveStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum PickingTaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum AlertType {
+  LOW_STOCK
+  DELAYED_ORDER
+  STUCK_ORDER
+  RESERVATION_FAILURE
+  CARRIER_DELAY
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum AlertStatus {
+  OPEN
+  RESOLVED
+}
+
+// ---------------------------------------------------------------------------
+// Identity & audit
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(OPERATOR)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  assignedOrders   Order[]       @relation("AssignedOperator")
+  createdWaves     PickingWave[] @relation("WaveCreatedBy")
+  assignedTasks    PickingTask[] @relation("TaskAssignedTo")
+  resolvedAlerts   Alert[]       @relation("AlertResolvedBy")
+  auditLogs        AuditLog[]
+
+  @@index([role])
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id])
+  action        String // e.g. "ORDER_STATUS_CHANGED", "USER_CREATED"
+  entityType    String // e.g. "Order", "Product", "User"
+  entityId      String
+  previousValue Json?
+  newValue      Json?
+  ipAddress     String?
+  createdAt     DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Catalog & inventory
+// ---------------------------------------------------------------------------
+
+model Product {
+  id          String   @id @default(cuid())
+  sku         String   @unique
+  name        String
+  description String?
+  location    String? // warehouse bin, e.g. "A-04-12"
+  minStock    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  inventory     Inventory?
+  orderItems    OrderItem[]
+  pickingTasks  PickingTask[]
+  reservations  InventoryReservation[]
+
+  @@index([name])
+}
+
+// Kept as its own table (1:1 with Product) instead of columns on Product so
+// the hot read/write path (stock levels) is isolated from catalog metadata
+// writes, and so the row-level lock taken during a reservation never blocks
+// on unrelated Product edits.
+model Inventory {
+  id          String   @id @default(cuid())
+  productId   String   @unique
+  product     Product  @relation(fields: [productId], references: [id])
+  available   Int      @default(0)
+  reserved    Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@index([available])
+}
+
+// One row per unit of stock set aside for an order. Keeping a ledger (rather
+// than only mutating the Inventory counters) means every reservation is
+// individually auditable and reversible (release on cancel, consume on pick).
+model InventoryReservation {
+  id        String             @id @default(cuid())
+  productId String
+  product   Product            @relation(fields: [productId], references: [id])
+  orderId   String
+  order     Order              @relation(fields: [orderId], references: [id])
+  quantity  Int
+  status    ReservationStatus  @default(ACTIVE)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  @@index([productId])
+  @@index([orderId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+model Carrier {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  orders    Order[]
+  shipments Shipment[]
+
+  @@index([name])
+}
+
+model Order {
+  id                  String        @id @default(cuid())
+  number              String        @unique
+  customerName        String
+  customerEmail       String?
+  deliveryAddress     String
+  status              OrderStatus   @default(RECEIVED)
+  priority            OrderPriority @default(NORMAL)
+  totalValue           Decimal       @db.Decimal(12, 2)
+  carrierId           String?
+  carrier             Carrier?      @relation(fields: [carrierId], references: [id])
+  assignedOperatorId  String?
+  assignedOperator    User?         @relation("AssignedOperator", fields: [assignedOperatorId], references: [id])
+  pickingWaveId       String?
+  pickingWave         PickingWave?  @relation(fields: [pickingWaveId], references: [id])
+  estimatedDeliveryAt DateTime?
+  deliveredAt         DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  items         OrderItem[]
+  reservations  InventoryReservation[]
+  trackingEvents TrackingEvent[]
+  shipment      Shipment?
+
+  @@index([status])
+  @@index([priority])
+  @@index([carrierId])
+  @@index([pickingWaveId])
+  @@index([assignedOperatorId])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id])
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int
+  unitPrice Decimal @db.Decimal(12, 2)
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model TrackingEvent {
+  id          String      @id @default(cuid())
+  orderId     String
+  order       Order       @relation(fields: [orderId], references: [id])
+  status      OrderStatus
+  description String
+  createdAt   DateTime    @default(now())
+
+  @@index([orderId])
+}
+
+model Shipment {
+  id                  String    @id @default(cuid())
+  orderId             String    @unique
+  order               Order     @relation(fields: [orderId], references: [id])
+  carrierId           String
+  carrier             Carrier   @relation(fields: [carrierId], references: [id])
+  trackingCode        String    @unique
+  shippedAt           DateTime  @default(now())
+  estimatedDeliveryAt DateTime?
+  deliveredAt         DateTime?
+
+  @@index([carrierId])
+}
+
+// ---------------------------------------------------------------------------
+// Picking waves
+// ---------------------------------------------------------------------------
+
+model PickingWave {
+  id          String            @id @default(cuid())
+  code        String            @unique
+  status      PickingWaveStatus @default(OPEN)
+  createdById String
+  createdBy   User              @relation("WaveCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime          @default(now())
+  completedAt DateTime?
+
+  orders Order[]
+  tasks  PickingTask[]
+
+  @@index([status])
+}
+
+model PickingTask {
+  id           String            @id @default(cuid())
+  waveId       String
+  wave         PickingWave       @relation(fields: [waveId], references: [id])
+  productId    String
+  product      Product           @relation(fields: [productId], references: [id])
+  quantity     Int
+  assignedToId String?
+  assignedTo   User?             @relation("TaskAssignedTo", fields: [assignedToId], references: [id])
+  status       PickingTaskStatus @default(PENDING)
+  completedAt  DateTime?
+  createdAt    DateTime          @default(now())
+
+  @@index([waveId])
+  @@index([assignedToId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Alerts
+// ---------------------------------------------------------------------------
+
+model Alert {
+  id           String        @id @default(cuid())
+  type         AlertType
+  severity     AlertSeverity @default(WARNING)
+  message      String
+  entityType   String?
+  entityId     String?
+  status       AlertStatus   @default(OPEN)
+  resolvedById String?
+  resolvedBy   User?         @relation("AlertResolvedBy", fields: [resolvedById], references: [id])
+  resolvedAt   DateTime?
+  createdAt    DateTime      @default(now())
+
+  @@index([status])
+  @@index([type])
+  @@index([entityType, entityId])
+}
